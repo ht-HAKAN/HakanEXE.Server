@@ -5,21 +5,21 @@ using HakanEXE.Server.Core;
 using HakanEXE.Server.Models;
 using System.Collections.Concurrent; // Birden fazla iş parçacığı için güvenli koleksiyon
 using System.Collections.Generic;    // Dictionary için eklendi
+using System.Linq; // ToList() için eklendi
 
 namespace HakanEXE.Server.Forms
 {
     public partial class MainServerForm : Form
     {
         private ServerManager _serverManager;
-        private ConcurrentDictionary<string, ClientInfo> _connectedClients; // IP'ye göre istemcileri tutuyorduk, AgentId daha iyi olabilir.
-                                                                            // Şimdilik IP ile devam edelim, ClientInfo içinde AgentId var.
+        private ConcurrentDictionary<string, ClientInfo> _connectedClients;
 
         // YENİ EKLENEN ALAN: Açık olan ClientDetailForm'ları AgentId ile takip etmek için
         private Dictionary<string, ClientDetailForm> _openDetailForms = new Dictionary<string, ClientDetailForm>();
 
         public MainServerForm()
         {
-            InitializeComponent(); // Form bileşenlerini başlatır (Tasarımcı tarafından oluşturulan kısım)
+            InitializeComponent();
             _connectedClients = new ConcurrentDictionary<string, ClientInfo>();
             InitializeServer();
             SetupListView();
@@ -27,7 +27,7 @@ namespace HakanEXE.Server.Forms
 
         private void InitializeServer()
         {
-            _serverManager = new ServerManager(8888); // Portu buradan değiştirebiliriz
+            _serverManager = new ServerManager(8888);
             _serverManager.ClientConnected += ServerManager_ClientConnected;
             _serverManager.ClientDisconnected += ServerManager_ClientDisconnected;
             _serverManager.PacketReceived += ServerManager_PacketReceived;
@@ -37,9 +37,8 @@ namespace HakanEXE.Server.Forms
 
         private void SetupListView()
         {
-            // listViewClients adında bir ListView kontrolü olduğunu varsayalım
             listViewClients.View = View.Details;
-            listViewClients.FullRowSelect = true; // Satırın tamamını seçmeyi etkinleştir
+            listViewClients.FullRowSelect = true;
             listViewClients.Columns.Add("Agent ID", 120);
             listViewClients.Columns.Add("Bilgisayar Adı", 150);
             listViewClients.Columns.Add("IP Adresi", 120);
@@ -50,21 +49,17 @@ namespace HakanEXE.Server.Forms
 
         private void ServerManager_ClientConnected(object sender, ClientInfo clientInfo)
         {
-            if (clientInfo == null || string.IsNullOrEmpty(clientInfo.IpAddress))
+            if (clientInfo == null || string.IsNullOrEmpty(clientInfo.AgentId)) // AgentId üzerinden kontrol daha iyi
             {
-                Console.WriteLine("ServerManager_ClientConnected: clientInfo veya IpAddress null/boş.");
+                Console.WriteLine("ServerManager_ClientConnected: clientInfo veya AgentId null/boş.");
                 return;
             }
 
-            // UI güncellemesi için Invoke kullan
             this.Invoke((MethodInvoker)delegate
             {
-                // AgentId'yi anahtar olarak kullanmak daha güvenilir olabilir, çünkü IP'ler değişebilir veya birden fazla agent aynı IP'den (NAT arkası) gelebilir (gerçi LAN'da bu daha az olası).
-                // Şimdilik IP adresi ile devam ediyoruz ama ClientInfo içinde AgentId de var.
-                // _connectedClients için de AgentId'yi anahtar yapmak daha iyi olabilir.
-                if (!_connectedClients.ContainsKey(clientInfo.IpAddress)) // Veya AgentId'ye göre kontrol et
+                if (!_connectedClients.ContainsKey(clientInfo.AgentId))
                 {
-                    if (_connectedClients.TryAdd(clientInfo.IpAddress, clientInfo)) // Veya AgentId'ye göre ekle
+                    if (_connectedClients.TryAdd(clientInfo.AgentId, clientInfo))
                     {
                         UpdateClientList();
                         Console.WriteLine($"Yeni İstemci Bağlandı ve Listeye Eklendi: {clientInfo.ComputerName} ({clientInfo.IpAddress}), AgentID: {clientInfo.AgentId}");
@@ -72,109 +67,95 @@ namespace HakanEXE.Server.Forms
                 }
                 else
                 {
-                    // Zaten listede varsa, bilgilerini güncelle (özellikle LastActive ve IsOnline durumu)
-                    _connectedClients[clientInfo.IpAddress] = clientInfo; // Bilgileri güncelle
-                    UpdateClientStatus(clientInfo.IpAddress, "Çevrimiçi (Yeniden Bağlandı)");
-                    Console.WriteLine($"Varolan İstemci Tekrar Bağlandı/Bilgisi Güncellendi: {clientInfo.ComputerName} ({clientInfo.IpAddress})");
+                    _connectedClients[clientInfo.AgentId] = clientInfo;
+                    UpdateClientStatus(clientInfo.AgentId, "Çevrimiçi (Yeniden Bağlandı)");
+                    Console.WriteLine($"Varolan İstemci Tekrar Bağlandı/Bilgisi Güncellendi: {clientInfo.ComputerName} ({clientInfo.AgentId})");
                 }
             });
         }
 
         private void ServerManager_ClientDisconnected(object sender, ClientInfo clientInfo)
         {
-            if (clientInfo == null || string.IsNullOrEmpty(clientInfo.IpAddress))
+            if (clientInfo == null || string.IsNullOrEmpty(clientInfo.AgentId))
             {
-                // Eğer clientInfo null ise, _openDetailForms'u temizleyemeyiz.
-                // Bu durum ServerManager'daki null check ile çözülmeye çalışılmıştı.
-                Console.WriteLine("ServerManager_ClientDisconnected: clientInfo veya IpAddress null/boş.");
-                // Belki tüm bağlantısı kopmuş formları kontrol edip kapatmak gerekebilir.
+                Console.WriteLine("ServerManager_ClientDisconnected: clientInfo veya AgentId null/boş.");
                 return;
             }
 
             this.Invoke((MethodInvoker)delegate
             {
                 ClientInfo removedClient;
-                if (_connectedClients.TryRemove(clientInfo.IpAddress, out removedClient)) // Veya AgentId'ye göre
+                if (_connectedClients.TryRemove(clientInfo.AgentId, out removedClient))
                 {
                     UpdateClientList();
-                    Console.WriteLine($"İstemci Ayrıldı ve Listeden Silindi: {clientInfo.ComputerName} ({clientInfo.IpAddress})");
+                    Console.WriteLine($"İstemci Ayrıldı ve Listeden Silindi: {clientInfo.ComputerName} ({clientInfo.AgentId})");
                 }
 
-                // İlgili istemcinin detay formu açıksa onu da kapat veya listeden çıkar
-                if (!string.IsNullOrEmpty(clientInfo.AgentId) && _openDetailForms.ContainsKey(clientInfo.AgentId))
+                if (_openDetailForms.TryGetValue(clientInfo.AgentId, out ClientDetailForm openForm))
                 {
-                    if (!_openDetailForms[clientInfo.AgentId].IsDisposed)
+                    if (openForm != null && !openForm.IsDisposed)
                     {
-                        // Formu kapatmak yerine, belki kullanıcıya bilgi verip pasif hale getirebiliriz.
-                        // Şimdilik sadece listeden çıkaralım, form zaten kapanmış olabilir.
-                        // _openDetailForms[clientInfo.AgentId].Close(); // Otomatik kapatma
+                        // Formu UI thread'inde kapatmak daha güvenli olabilir.
+                        // openForm.Close(); // Otomatik kapatma için
+                        Console.WriteLine($"İlgili detay formu ({clientInfo.AgentId}) bağlantı kesildiği için kapatılacak veya pasif hale getirilecek.");
                     }
                     _openDetailForms.Remove(clientInfo.AgentId);
-                    Console.WriteLine($"İlgili detay formu ({clientInfo.AgentId}) kapatılanlar listesinden çıkarıldı.");
                 }
             });
         }
 
         private void ServerManager_PacketReceived(object sender, Packet packet)
         {
-            if (packet == null || string.IsNullOrEmpty(packet.SenderIp)) return;
+            if (packet == null || string.IsNullOrEmpty(packet.SenderIp)) return; // SenderIp yerine AgentId kullanılmalı paketlerde de
 
-            this.Invoke((MethodInvoker)delegate
+            // AgentId'yi paketten almak daha doğru olurdu, şimdilik SenderIp ile eşleşen client'ı bulalım.
+            // Bu kısım ClientDetailForm'a daha çok veri gönderecek.
+            // Ana formda sadece heartbeat ile son aktifliği güncellemek yeterli olabilir.
+            var clientEntry = _connectedClients.FirstOrDefault(kvp => kvp.Value.IpAddress == packet.SenderIp);
+            if (!string.IsNullOrEmpty(clientEntry.Key)) // Eğer client bulunduysa (AgentId'si boş değilse)
             {
-                if (_connectedClients.TryGetValue(packet.SenderIp, out ClientInfo client)) // Veya AgentId ile eşleştir
+                ClientInfo client = clientEntry.Value;
+                if (client != null)
                 {
-                    client.LastActive = DateTime.Now;
-                    UpdateClientStatus(packet.SenderIp, "Çevrimiçi");
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        client.LastActive = DateTime.Now;
+                        UpdateClientStatus(client.AgentId, "Çevrimiçi");
 
-                    if (packet.PacketType == PacketType.Heartbeat)
-                    {
-                        // Heartbeat geldiyse sadece son aktif zamanını güncellemek yeterli olabilir.
-                        // Console.WriteLine($"Heartbeat alındı: {packet.SenderIp}");
-                    }
-                    else if (packet.PacketType == PacketType.SystemInfo)
-                    {
-                        // Bu paket ClientDetailForm tarafından istenir ve orada işlenir.
-                        // MainServerForm'un bu paketi doğrudan işlemesine gerek yok gibi.
-                        // Ama eğer ClientInfo'yu güncellemek istersek:
-                        // try {
-                        //    ClientInfo updatedInfo = JsonConvert.DeserializeObject<ClientInfo>(packet.Data);
-                        //    if(updatedInfo != null) {
-                        //        client.ComputerName = updatedInfo.ComputerName; // vb.
-                        //        // UpdateClientList(); // Liste görünümünü güncelle
-                        //    }
-                        // } catch (Exception ex) { Console.WriteLine($"SystemInfo paketi işlenirken hata: {ex.Message}");}
-                    }
-                    // Diğer paket türleri genellikle ClientDetailForm tarafından ele alınacak.
-                    // Bu olay ClientDetailForm'a da yönlendiriliyor.
+                        if (packet.PacketType == PacketType.Heartbeat)
+                        {
+                            // Console.WriteLine($"Heartbeat alındı: {client.AgentId}");
+                        }
+                        // Diğer paket türleri ClientDetailForm tarafından işlenecek,
+                        // ServerManager'daki PacketReceived olayı ClientDetailForm'a da abone edilecek.
+                    });
                 }
-            });
+            }
         }
 
         private void UpdateClientList()
         {
             listViewClients.Items.Clear();
-            foreach (var client in _connectedClients.Values.ToList()) // ToList() ile koleksiyon değişirken hata almayı engelle
+            foreach (var client in _connectedClients.Values.ToList())
             {
-                if (client == null) continue; // Ekstra güvenlik
+                if (client == null) continue;
 
                 var item = new ListViewItem(client.AgentId ?? "N/A");
                 item.SubItems.Add(client.ComputerName ?? "N/A");
                 item.SubItems.Add(client.IpAddress ?? "N/A");
-                item.SubItems.Add(client.IsOnline ? "Çevrimiçi" : "Çevrimdışı");
-                item.SubItems.Add(client.LastActive.ToString("G")); // Genel tarih/saat formatı
+                item.SubItems.Add(client.IsOnline ? "Çevrimiçi" : "Çevrimdışı"); // IsOnline property'si ClientInfo'da olmalı
+                item.SubItems.Add(client.LastActive.ToString("G"));
                 item.Tag = client;
                 listViewClients.Items.Add(item);
             }
         }
 
-        private void UpdateClientStatus(string ipAddressOrAgentId, string status)
+        private void UpdateClientStatus(string agentId, string status)
         {
-            // Anahtar olarak IP yerine AgentId kullanmak daha iyi olurdu.
-            // Şimdilik IP ile devam.
             foreach (ListViewItem item in listViewClients.Items)
             {
                 ClientInfo client = item.Tag as ClientInfo;
-                if (client != null && client.IpAddress == ipAddressOrAgentId) // Veya client.AgentId == ipAddressOrAgentId
+                if (client != null && client.AgentId == agentId)
                 {
                     item.SubItems[3].Text = status;
                     item.SubItems[4].Text = DateTime.Now.ToString("G");
@@ -190,33 +171,29 @@ namespace HakanEXE.Server.Forms
                 ClientInfo selectedClient = listViewClients.SelectedItems[0].Tag as ClientInfo;
                 if (selectedClient != null && !string.IsNullOrEmpty(selectedClient.AgentId))
                 {
-                    // Eğer bu istemci için zaten bir detay formu açıksa, onu öne getir.
                     if (_openDetailForms.TryGetValue(selectedClient.AgentId, out ClientDetailForm existingForm))
                     {
                         if (existingForm != null && !existingForm.IsDisposed)
                         {
                             existingForm.WindowState = FormWindowState.Minimized;
-                            existingForm.Show(); // Formu göster (eğer gizlenmişse)
+                            existingForm.Show();
                             existingForm.WindowState = FormWindowState.Normal;
-                            existingForm.Activate(); // Formu aktif et ve öne getir
+                            existingForm.Activate();
                             Console.WriteLine($"Varolan ClientDetailForm öne getirildi: {selectedClient.AgentId}");
-                            return; // Yeni form oluşturma
+                            return;
                         }
                         else
                         {
-                            // Eğer form dispose edilmişse listeden kaldır
                             _openDetailForms.Remove(selectedClient.AgentId);
                             Console.WriteLine($"Dispose edilmiş ClientDetailForm listeden kaldırıldı: {selectedClient.AgentId}");
                         }
                     }
 
-                    // Yeni bir ClientDetailForm oluştur ve göster
                     Console.WriteLine($"Yeni ClientDetailForm oluşturuluyor: {selectedClient.AgentId}");
                     ClientDetailForm detailForm = new ClientDetailForm(selectedClient, _serverManager);
 
                     detailForm.FormClosed += (s, ev) =>
                     {
-                        // Form kapatıldığında _openDetailForms listesinden kaldır
                         if (_openDetailForms.ContainsKey(selectedClient.AgentId))
                         {
                             _openDetailForms.Remove(selectedClient.AgentId);
@@ -224,8 +201,8 @@ namespace HakanEXE.Server.Forms
                         }
                     };
 
-                    _openDetailForms[selectedClient.AgentId] = detailForm; // Yeni formu listeye ekle
-                    detailForm.Show(); // Modeless olarak aç
+                    _openDetailForms[selectedClient.AgentId] = detailForm;
+                    detailForm.Show();
                 }
                 else if (selectedClient != null && string.IsNullOrEmpty(selectedClient.AgentId))
                 {
@@ -234,34 +211,22 @@ namespace HakanEXE.Server.Forms
             }
         }
 
-        private async void BtnScanNetwork_Click(object sender, EventArgs e) // async void eklendi
+        private async void BtnScanNetwork_Click(object sender, EventArgs e)
         {
-            // Bu özellik için NetworkScanner.cs'in doğru implemente edilmiş olması lazım.
             if (_serverManager == null) return;
 
-            // NetworkScanner sınıfı ServerManager içinde oluşturulabilir veya buradan direkt çağrılabilir.
-            // Şimdilik ServerManager'a bir metot eklediğimizi varsayalım:
-            // _serverManager.ScanForAgentsOnNetwork(); 
-
-            // Veya NetworkScanner'ı burada direkt kullanalım:
             NetworkScanner scanner = new NetworkScanner();
             scanner.AgentDiscovered += (s, agentEndPoint) =>
             {
-                // Bu olay farklı bir thread'den gelebilir, UI güncellemesi için Invoke gerekli.
                 this.Invoke((MethodInvoker)delegate
                 {
-                    // Keşfedilen agent için ne yapılacağına karar verilmeli.
-                    // Belki bir "Keşfedilenler" listesine eklenir veya direkt bağlanmaya çalışılır.
-                    // Şimdilik sadece bir mesaj gösterelim.
                     MessageBox.Show($"Yeni Agent keşfedildi: {agentEndPoint.Address}:{agentEndPoint.Port}", "Ağ Taraması");
-                    // Burada agent'a direkt bağlanma veya listeye ekleme mantığı eklenebilir.
-                    // Örneğin, _serverManager.ConnectToDiscoveredAgent(agentEndPoint);
                 });
             };
 
             try
             {
-                await scanner.ScanNetworkAsync(); // Asenkron olarak tarama yap
+                await scanner.ScanNetworkAsync();
                 MessageBox.Show("Ağ tarama isteği gönderildi. Yanıtlar bekleniyor...", "Ağ Taraması");
             }
             catch (Exception ex)
