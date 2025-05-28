@@ -1,99 +1,77 @@
 ﻿using System;
-using System.Management; // System.Management referansı eklenmiş olmalı
+using System.Management;
 using System.Net;
 using System.Net.NetworkInformation;
-using System.Net.Sockets; // Socket sınıfı için
+using System.Net.Sockets;
 using System.Text;
-using System.Linq; // FirstOrDefault için
-// using System.Windows.Forms; // GetActiveWindowName için gerekebilir, şimdilik devre dışı
+using System.Linq;
+using System.Diagnostics;
 
 namespace HakanEXE.Agent.Core
 {
     public static class SystemInfoGatherer
     {
-        public static Models.ClientInfo GetDetailedSystemInfo() // ClientInfo modelini döndürecek şekilde güncellendi
+        // Bu metot artık doğrudan HakanEXE.Server.Models.ClientInfo döndürmeyecek,
+        // AgentClient içinde bu bilgiler kullanılarak ClientInfo nesnesi oluşturulacak.
+        // Şimdilik temel bilgileri toplayan ayrı metotlar yapalım veya ClientInfo'yu burada oluşturalım
+        // ama ek alanlar olmadan.
+        // Basitlik adına, ClientInfo nesnesini burada oluşturalım ama ekstradan Cpu, Ram vs. eklemeyelim.
+        public static HakanEXE.Server.Models.ClientInfo GetBasicSystemInfo()
         {
-            PerformanceCounter cpuCounter = null;
-            PerformanceCounter ramCounter = null;
-            string cpuUsage = "N/A";
-            string ramAvailable = "N/A";
-
-            try
+            // Not: AgentId ve diğer bazı alanlar AgentClient içinde atanacak.
+            // Burada sadece OS, ComputerName, UserName gibi temel bilgileri set edelim.
+            return new HakanEXE.Server.Models.ClientInfo
             {
-                cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total", true);
-                ramCounter = new PerformanceCounter("Memory", "Available MBytes", true);
-
-                cpuCounter.NextValue(); // İlk çağrı genellikle 0 döner
-                System.Threading.Thread.Sleep(250); // Kısa bir bekleme
-                cpuUsage = cpuCounter.NextValue().ToString("F0") + "%";
-                ramAvailable = ramCounter.NextValue().ToString("F0") + " MB";
-            }
-            catch (Exception ex) { Console.WriteLine($"Performans sayacı hatası: {ex.Message}"); }
-            finally
-            {
-                cpuCounter?.Dispose();
-                ramCounter?.Dispose();
-            }
-
-            return new Models.ClientInfo // Sunucudaki ClientInfo ile aynı olmalı
-            {
-                AgentId = "AgentID_Burada_Olusturulacak_Veya_AgentClient_Tarafindan_Atanacak", // AgentClient'ta atanıyor
+                // AgentId, IpAddress, MacAddress AgentClient.GetInitialClientInfo() içinde set ediliyor.
+                // LastActive ve IsOnline da AgentClient içinde yönetiliyor.
                 ComputerName = Environment.MachineName,
                 UserName = Environment.UserName,
-                IpAddress = GetLocalIPAddress(),
-                MacAddress = GetMacAddress(),
                 OperatingSystem = Environment.OSVersion.VersionString,
-                // LastActive ve IsOnline AgentClient'ta yönetiliyor.
-                // Ek bilgiler:
-                CpuUsage = cpuUsage,
-                RamAvailable = ramAvailable,
-                ActiveWindowTitle = GetActiveWindowName() // Şimdilik basit bir implementasyon
+                // CpuUsage = "N/A", // Şimdilik bunları eklemiyoruz
+                // RamAvailable = "N/A",
+                // ActiveWindowTitle = "N/A"
             };
         }
 
-        private static string GetLocalIPAddress()
+        // AgentClient içinde kullanılmak üzere ayrı metotlar da bırakabiliriz.
+        public static string GetCpuUsageForAgent()
         {
+            PerformanceCounter cpuCounter = null;
+            string cpuUsage = "N/A";
             try
             {
-                using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
-                {
-                    socket.Connect("8.8.8.8", 65530);
-                    IPEndPoint endPoint = socket.LocalEndPoint as IPEndPoint;
-                    return endPoint?.Address?.ToString() ?? "127.0.0.1";
-                }
+                cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total", true);
+                cpuCounter.NextValue();
+                System.Threading.Thread.Sleep(250);
+                cpuUsage = cpuCounter.NextValue().ToString("F0") + "%";
             }
-            catch
-            {
-                return NetworkInterface.GetAllNetworkInterfaces()
-                    .FirstOrDefault(ni => ni.OperationalStatus == OperationalStatus.Up && ni.NetworkInterfaceType != NetworkInterfaceType.Loopback && ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel)?
-                    .GetIPProperties().UnicastAddresses
-                    .FirstOrDefault(ip => ip.Address.AddressFamily == AddressFamily.InterNetwork)?
-                    .Address.ToString() ?? "127.0.0.1";
-            }
+            catch (Exception ex) { Console.WriteLine($"CPU Sayaç Hatası: {ex.Message}"); }
+            finally { cpuCounter?.Dispose(); }
+            return cpuUsage;
         }
 
-        private static string GetMacAddress()
+        public static string GetRamAvailableForAgent()
         {
-            return NetworkInterface.GetAllNetworkInterfaces()
-               .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback && nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
-               .Select(nic => nic.GetPhysicalAddress().ToString())
-               .FirstOrDefault(mac => !string.IsNullOrEmpty(mac)) ?? "N/A";
-        }
-
-        public static string GetActiveWindowName()
-        {
-            // Bu kısım P/Invoke (WinAPI) gerektirir ve daha karmaşıktır.
-            // Şimdilik basit bir yer tutucu:
+            PerformanceCounter ramCounter = null;
+            string ramAvailable = "N/A";
             try
             {
-                // IntPtr handle = NativeMethods.WinAPI.GetForegroundWindow();
-                // int capacity = NativeMethods.WinAPI.GetWindowTextLength(handle) * 2;
-                // StringBuilder stringBuilder = new StringBuilder(capacity);
-                // NativeMethods.WinAPI.GetWindowText(handle, stringBuilder, stringBuilder.Capacity);
-                // return stringBuilder.ToString();
-                return "Aktif Pencere (WinAPI Gerekli)";
+                ramCounter = new PerformanceCounter("Memory", "Available MBytes", true);
+                ramAvailable = ramCounter.NextValue().ToString("F0") + " MB";
             }
-            catch { return "N/A"; }
+            catch (Exception ex) { Console.WriteLine($"RAM Sayaç Hatası: {ex.Message}"); }
+            finally { ramCounter?.Dispose(); }
+            return ramAvailable;
         }
+
+        public static string GetActiveWindowNameForAgent()
+        {
+            // P/Invoke gerektirir, şimdilik basit yer tutucu
+            return "Aktif Pencere (WinAPI Gerekli)";
+        }
+
+        // GetLocalIPAddress ve GetMacAddress gibi metotlar AgentClient içinde olduğu için
+        // SystemInfoGatherer'dan çıkarılabilir veya private static olarak kalabilir.
+        // Şimdilik AgentClient'taki versiyonları kullanılacak.
     }
 }
