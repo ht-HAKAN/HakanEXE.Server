@@ -3,12 +3,15 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace HakanEXE.Agent.Core
+namespace HakanEXE.Agent.Core 
 {
     public static class EncryptionHelper
     {
-        private static readonly byte[] Key = Encoding.UTF8.GetBytes("BuBirGizliAnahtar1234567890123456"); // 32 byte
-        private static readonly byte[] IV = Encoding.UTF8.GetBytes("BuBirIlklendirme"); // 16 byte
+        // Güvenli bir anahtar ve IV oluşturmanız önemlidir.
+        // Gerçek uygulamada bunları kod içine sabit olarak gömmeyin, güvenli bir şekilde saklayın.
+        // Örnek amaçlı sabit değerler kullanılıyor.
+        private static readonly byte[] Key = Encoding.UTF8.GetBytes("BuBirGizliAnahtar1234567890123456"); // 32 byte = 256 bit
+        private static readonly byte[] IV = Encoding.UTF8.GetBytes("BuBirIlklendirme"); // 16 byte = 128 bit
 
         public static byte[] Encrypt(string plainText)
         {
@@ -21,9 +24,10 @@ namespace HakanEXE.Agent.Core
                 aesAlg.Key = Key;
                 aesAlg.IV = IV;
                 aesAlg.Mode = CipherMode.CBC;
-                aesAlg.Padding = PaddingMode.PKCS7;
+                aesAlg.Padding = PaddingMode.PKCS7; // Padding modu açıkça belirtildi
 
                 ICryptoTransform encryptor = aesAlg.CreateEncryptor(aesAlg.Key, aesAlg.IV);
+
                 using (MemoryStream msEncrypt = new MemoryStream())
                 {
                     using (CryptoStream csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
@@ -50,9 +54,10 @@ namespace HakanEXE.Agent.Core
                 aesAlg.Key = Key;
                 aesAlg.IV = IV;
                 aesAlg.Mode = CipherMode.CBC;
-                aesAlg.Padding = PaddingMode.PKCS7;
+                aesAlg.Padding = PaddingMode.PKCS7; // Padding modu açıkça belirtildi
 
                 ICryptoTransform decryptor = aesAlg.CreateDecryptor(aesAlg.Key, aesAlg.IV);
+
                 using (MemoryStream msDecrypt = new MemoryStream(cipherText))
                 {
                     using (CryptoStream csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read))

@@ -3,7 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace HakanEXE.Server.Core
+namespace HakanEXE.Server.Core 
 {
     public static class EncryptionHelper
     {
@@ -24,7 +24,7 @@ namespace HakanEXE.Server.Core
                 aesAlg.Key = Key;
                 aesAlg.IV = IV;
                 aesAlg.Mode = CipherMode.CBC;
-                aesAlg.Padding = PaddingMode.PKCS7; // EKLENDİ
+                aesAlg.Padding = PaddingMode.PKCS7; // Padding modu açıkça belirtildi
 
                 ICryptoTransform encryptor = aesAlg.CreateEncryptor(aesAlg.Key, aesAlg.IV);
 
@@ -54,7 +54,7 @@ namespace HakanEXE.Server.Core
                 aesAlg.Key = Key;
                 aesAlg.IV = IV;
                 aesAlg.Mode = CipherMode.CBC;
-                aesAlg.Padding = PaddingMode.PKCS7; // EKLENDİ
+                aesAlg.Padding = PaddingMode.PKCS7; // Padding modu açıkça belirtildi
 
                 ICryptoTransform decryptor = aesAlg.CreateDecryptor(aesAlg.Key, aesAlg.IV);
 
