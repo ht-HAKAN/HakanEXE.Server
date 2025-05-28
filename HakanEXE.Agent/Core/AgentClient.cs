@@ -3,13 +3,12 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using HakanEXE.Server.Models; // Bu satır için Server'a proje referansı ŞART!
+using HakanEXE.Server.Models;
 using Newtonsoft.Json;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Linq;
 using System.Net;
-// System.Management, SystemInfoGatherer içinde kullanılıyor.
 
 namespace HakanEXE.Agent.Core
 {
@@ -24,16 +23,29 @@ namespace HakanEXE.Agent.Core
         private Thread _heartbeatThread;
         private ClientInfo _myClientInfo;
 
-        public AgentClient(string serverIp, int serverPort) // Program.cs'in çağırdığı constructor
+        public AgentClient(string serverIp, int serverPort)
         {
             _serverIp = serverIp;
             _serverPort = serverPort;
         }
 
-        public void Start() // Program.cs'in çağırdığı Start metodu
+        public void Start()
         {
             Console.WriteLine("Agent başlatılıyor...");
-            _myClientInfo = GetInitialClientInfo();
+            try
+            {
+                _myClientInfo = GetInitialClientInfo();
+                if (_myClientInfo == null)
+                {
+                    Console.WriteLine("HATA: _myClientInfo başlatılamadı (GetInitialClientInfo null döndü). Agent durduruluyor.");
+                    return; // _myClientInfo null ise devam etme
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"HATA: GetInitialClientInfo sırasında bir istisna oluştu: {ex.Message}. Agent durduruluyor.");
+                return; // İstisna durumunda devam etme
+            }
 
             Task.Run(() => ConnectToServer());
             ListenForDiscoveryRequests();
@@ -41,23 +53,39 @@ namespace HakanEXE.Agent.Core
 
         private ClientInfo GetInitialClientInfo()
         {
-            // Şimdilik SystemInfoGatherer'ı çağırmadan temel bilgileri set edelim
-            // Hataları en aza indirmek için.
-            return new ClientInfo
+            try
             {
-                AgentId = Guid.NewGuid().ToString(),
-                ComputerName = Environment.MachineName,
-                UserName = Environment.UserName,
-                IpAddress = GetLocalIPAddress(),
-                MacAddress = GetMacAddress(),
-                OperatingSystem = Environment.OSVersion.VersionString,
-                LastActive = DateTime.Now,
-                IsOnline = true
-            };
+                Console.WriteLine("GetInitialClientInfo() çağrıldı.");
+                ClientInfo info = new ClientInfo
+                {
+                    AgentId = Guid.NewGuid().ToString(),
+                    ComputerName = Environment.MachineName,
+                    UserName = Environment.UserName,
+                    IpAddress = GetLocalIPAddress(),
+                    MacAddress = GetMacAddress(),
+                    OperatingSystem = Environment.OSVersion.VersionString,
+                    LastActive = DateTime.Now,
+                    IsOnline = true
+                };
+                Console.WriteLine($"ClientInfo oluşturuldu: ID={info.AgentId}, IP={info.IpAddress}");
+                return info;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"GetInitialClientInfo içinde HATA: {ex.ToString()}");
+                return null; // Hata durumunda null döndür, Start() metodu bunu yakalasın
+            }
         }
 
         private void ConnectToServer()
         {
+            Console.WriteLine("ConnectToServer() thread'i başlatıldı.");
+            if (_myClientInfo == null)
+            {
+                Console.WriteLine("HATA: ConnectToServer içinde _myClientInfo null. Bu durum beklenmiyor. Thread sonlandırılıyor.");
+                return;
+            }
+
             while (!_isConnected)
             {
                 try
@@ -67,9 +95,23 @@ namespace HakanEXE.Agent.Core
                     _client.Connect(_serverIp, _serverPort);
                     _stream = _client.GetStream();
                     _isConnected = true;
-                    Console.WriteLine("Sunucuya bağlandı.");
+                    Console.WriteLine("Sunucuya bağlandı."); // BURASI ÖNCEKİ KODDA YAKLAŞIK 68. SATIRDI
 
-                    SendPacketInternal(new Packet { PacketType = PacketType.ClientInfo, Data = JsonConvert.SerializeObject(_myClientInfo), SenderIp = _myClientInfo.IpAddress });
+                    // ClientInfo paketini göndermeden önce _myClientInfo'nun null olmadığını tekrar kontrol edelim (paranoya için)
+                    if (_myClientInfo == null)
+                    {
+                        Console.WriteLine("KRİTİK HATA: _myClientInfo, ClientInfo paketi gönderilmeden hemen önce null oldu!");
+                        // Bağlantıyı sonlandırabilir veya hata yönetimi yapabiliriz.
+                        _isConnected = false; // Döngüden çıkmayı tetikle
+                        CleanupNetworkResources();
+                        continue; // veya return;
+                    }
+                    string clientInfoJson = JsonConvert.SerializeObject(_myClientInfo);
+                    string clientIpForPacket = _myClientInfo.IpAddress; // NullReferenceException burada olabilir eğer _myClientInfo null ise
+
+                    SendPacketInternal(new Packet { PacketType = PacketType.ClientInfo, Data = clientInfoJson, SenderIp = clientIpForPacket });
+                    Console.WriteLine("ClientInfo paketi gönderildi.");
+
 
                     _receiveThread = new Thread(ReceiveData);
                     _receiveThread.IsBackground = true;
@@ -82,8 +124,21 @@ namespace HakanEXE.Agent.Core
                         _heartbeatThread.Start();
                     }
                 }
-                catch (SocketException) { Thread.Sleep(5000); } // Kısaca geçelim
-                catch (Exception) { Thread.Sleep(5000); }  // Kısaca geçelim
+                catch (NullReferenceException nre)
+                {
+                    Console.WriteLine($"ConnectToServer içinde NullReferenceException: {nre.ToString()}");
+                    Thread.Sleep(5000);
+                }
+                catch (SocketException sex)
+                {
+                    Console.WriteLine($"ConnectToServer içinde SocketException: {sex.Message}");
+                    Thread.Sleep(5000);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"ConnectToServer içinde genel Exception: {ex.ToString()}");
+                    Thread.Sleep(5000);
+                }
             }
         }
 
@@ -95,10 +150,11 @@ namespace HakanEXE.Agent.Core
                 while (_isConnected && _client != null && _client.Connected && _stream != null && _stream.CanRead)
                 {
                     int bytesRead = _stream.Read(headerBuffer, 0, headerBuffer.Length);
-                    if (bytesRead == 0) break; // Bağlantı kapandı
+                    if (bytesRead == 0) { Console.WriteLine("ReceiveData: Stream 0 byte döndü, bağlantı kapandı varsayılıyor."); break; }
 
                     int dataLength = BitConverter.ToInt32(headerBuffer, 0);
-                    if (dataLength <= 0) continue;
+                    if (dataLength <= 0) { Console.WriteLine($"ReceiveData: Geçersiz veri uzunluğu alındı: {dataLength}"); continue; }
+                    if (dataLength > 10 * 1024 * 1024) { Console.WriteLine($"ReceiveData: Çok büyük veri uzunluğu: {dataLength}. Paket atlanıyor."); _stream.Flush(); continue; } // Güvenlik önlemi
 
                     byte[] dataBuffer = new byte[dataLength];
                     int totalBytesRead = 0;
@@ -108,16 +164,19 @@ namespace HakanEXE.Agent.Core
                         if (bytesRead == 0) break;
                         totalBytesRead += bytesRead;
                     }
-                    if (totalBytesRead < dataLength) break; // Tam paket okunamadı
+                    if (totalBytesRead < dataLength) { Console.WriteLine("ReceiveData: Paket tam okunamadı."); break; }
 
-                    string decryptedData = EncryptionHelper.Decrypt(dataBuffer); // EncryptionHelper.cs doğru olmalı
+                    string decryptedData = EncryptionHelper.Decrypt(dataBuffer);
                     Packet receivedPacket = JsonConvert.DeserializeObject<Packet>(decryptedData);
                     if (receivedPacket != null) HandleCommand(receivedPacket);
                 }
             }
-            catch { /* Şimdilik hataları yoksayalım, bağlantı kopunca finally çalışsın */ }
+            catch (ObjectDisposedException) { Console.WriteLine("ReceiveData: Stream veya Client dispose edilmiş."); }
+            catch (IOException ioEx) { Console.WriteLine($"ReceiveData IOException: {ioEx.Message}"); }
+            catch (Exception ex) { Console.WriteLine($"ReceiveData'da HATA: {ex.ToString()}"); }
             finally
             {
+                Console.WriteLine("ReceiveData finally bloğu çalıştı.");
                 _isConnected = false;
                 CleanupNetworkResources();
                 if (Thread.CurrentThread.IsBackground) Task.Run(() => ConnectToServer());
@@ -130,24 +189,26 @@ namespace HakanEXE.Agent.Core
             {
                 while (true)
                 {
-                    if (!_isConnected) break;
+                    if (!_isConnected) { Console.WriteLine("SendHeartbeat: Bağlantı yok, thread durduruluyor."); break; }
                     if (_client != null && _client.Connected && _stream != null && _stream.CanWrite)
                     {
-                        SendPacketInternal(new Packet { PacketType = PacketType.Heartbeat, Data = "alive", SenderIp = _myClientInfo.IpAddress });
+                        //Console.WriteLine("Heartbeat gönderiliyor...");
+                        SendPacketInternal(new Packet { PacketType = PacketType.Heartbeat, Data = "alive", SenderIp = _myClientInfo?.IpAddress ?? "UNKNOWN_IP" });
                     }
                     Thread.Sleep(5000);
                 }
             }
-            catch { /* Hataları yoksayalım */ }
+            catch (ThreadAbortException) { Console.WriteLine("Heartbeat thread'i sonlandırıldı."); }
+            catch (Exception ex) { Console.WriteLine($"SendHeartbeat'ta HATA: {ex.ToString()}"); }
         }
 
         private void SendPacketInternal(Packet packet)
         {
-            if (!_isConnected || _stream == null || !_stream.CanWrite) return;
+            if (!_isConnected || _stream == null || !_stream.CanWrite) { /*Console.WriteLine("SendPacketInternal: Bağlantı yok veya stream yazılamaz.");*/ return; }
             try
             {
                 string jsonPacket = JsonConvert.SerializeObject(packet);
-                byte[] encryptedData = EncryptionHelper.Encrypt(jsonPacket); // EncryptionHelper.cs doğru olmalı
+                byte[] encryptedData = EncryptionHelper.Encrypt(jsonPacket);
                 byte[] dataLength = BitConverter.GetBytes(encryptedData.Length);
                 lock (_stream)
                 {
@@ -156,14 +217,14 @@ namespace HakanEXE.Agent.Core
                     _stream.Flush();
                 }
             }
-            catch { _isConnected = false; } // Hata durumunda bağlantıyı kopmuş say
+            catch (ObjectDisposedException) { Console.WriteLine("SendPacketInternal: Stream dispose edilmiş."); _isConnected = false; }
+            catch (IOException ioEx) { Console.WriteLine($"SendPacketInternal IOException: {ioEx.Message}"); _isConnected = false; }
+            catch (Exception ex) { Console.WriteLine($"SendPacketInternal'da HATA: {ex.ToString()}"); _isConnected = false; }
         }
 
         private void HandleCommand(Packet commandPacket)
         {
-            // Şimdilik burayı boş bırakalım, sadece temel bağlantıyı test ediyoruz.
-            // Komut işleme mantığı daha sonra eklenecek.
-            // Console.WriteLine($"Komut Alındı: {commandPacket.PacketType}");
+            //Console.WriteLine($"Komut Alındı: {commandPacket.PacketType}");
         }
 
         private string GetLocalIPAddress()
@@ -182,10 +243,14 @@ namespace HakanEXE.Agent.Core
 
         private string GetMacAddress()
         {
-            return NetworkInterface.GetAllNetworkInterfaces()
-                .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback && nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
-                .Select(nic => nic.GetPhysicalAddress()?.ToString())
-                .FirstOrDefault(mac => !string.IsNullOrEmpty(mac)) ?? "N/A";
+            try
+            {
+                return NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback && nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
+                    .Select(nic => nic.GetPhysicalAddress()?.ToString())
+                    .FirstOrDefault(mac => !string.IsNullOrEmpty(mac)) ?? "N/A_MAC";
+            }
+            catch (Exception ex) { Console.WriteLine($"GetMacAddress HATA: {ex.Message}"); return "N/A_MAC_EX"; }
         }
 
         private void ListenForDiscoveryRequests()
@@ -195,6 +260,7 @@ namespace HakanEXE.Agent.Core
                 {
                     using (var udpClient = new UdpClient(12345))
                     {
+                        Console.WriteLine("UDP Discovery dinlemesi başlatıldı (Port 12345).");
                         while (true)
                         {
                             UdpReceiveResult result = await udpClient.ReceiveAsync();
@@ -206,7 +272,9 @@ namespace HakanEXE.Agent.Core
                         }
                     }
                 }
-                catch { /* UDP hatalarını şimdilik yoksayalım */ }
+                catch (ObjectDisposedException) { Console.WriteLine("UDP Discovery client dispose edildi."); }
+                catch (SocketException se) when (se.SocketErrorCode == SocketError.AddressAlreadyInUse) { Console.WriteLine("UDP Discovery HATA: Port 12345 zaten kullanılıyor."); }
+                catch (Exception ex) { Console.WriteLine($"UDP Discovery'de HATA: {ex.ToString()}"); }
             });
         }
 
@@ -221,6 +289,7 @@ namespace HakanEXE.Agent.Core
             _isConnected = false;
             CleanupNetworkResources();
             GC.SuppressFinalize(this);
+            Console.WriteLine("AgentClient Dispose çağrıldı.");
         }
     }
 }
