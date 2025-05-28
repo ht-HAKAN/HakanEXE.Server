@@ -3,14 +3,11 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace HakanEXE.Server.Core 
+namespace HakanEXE.Server.Core
 {
     public static class EncryptionHelper
     {
-        // Güvenli bir anahtar ve IV oluşturmanız önemlidir.
-        // Gerçek uygulamada bunları kod içine sabit olarak gömmeyin, güvenli bir şekilde saklayın.
-        // Örnek amaçlı sabit değerler kullanılıyor.
-        private static readonly byte[] Key = Encoding.UTF8.GetBytes("BuBirGizliAnahtar1234567890123456"); // 32 byte = 256 bit
+        private static readonly byte[] Key = Encoding.UTF8.GetBytes("BuBirGizliAnahtar123456789012345");
         private static readonly byte[] IV = Encoding.UTF8.GetBytes("BuBirIlklendirme"); // 16 byte = 128 bit
 
         public static byte[] Encrypt(string plainText)
@@ -24,7 +21,7 @@ namespace HakanEXE.Server.Core
                 aesAlg.Key = Key;
                 aesAlg.IV = IV;
                 aesAlg.Mode = CipherMode.CBC;
-                aesAlg.Padding = PaddingMode.PKCS7; // Padding modu açıkça belirtildi
+                aesAlg.Padding = PaddingMode.PKCS7;
 
                 ICryptoTransform encryptor = aesAlg.CreateEncryptor(aesAlg.Key, aesAlg.IV);
 
@@ -54,7 +51,7 @@ namespace HakanEXE.Server.Core
                 aesAlg.Key = Key;
                 aesAlg.IV = IV;
                 aesAlg.Mode = CipherMode.CBC;
-                aesAlg.Padding = PaddingMode.PKCS7; // Padding modu açıkça belirtildi
+                aesAlg.Padding = PaddingMode.PKCS7;
 
                 ICryptoTransform decryptor = aesAlg.CreateDecryptor(aesAlg.Key, aesAlg.IV);
 
