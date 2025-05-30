@@ -3,12 +3,13 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace HakanEXE.Agent.Core 
+namespace HakanEXE.Agent.Core // Namespace'in bu olduğundan emin ol
 {
     public static class EncryptionHelper
     {
-        private static readonly byte[] Key = Encoding.UTF8.GetBytes("BuBirGizliAnahtar123456789012345");
-        private static readonly byte[] IV = Encoding.UTF8.GetBytes("BuBirIlklendirme"); // 16 byte = 128 bit
+        // ANAHTAR KESİNLİKLE 32 KARAKTER / 32 BYTE OLMALI
+        private static readonly byte[] Key = Encoding.UTF8.GetBytes("BuBirGizliAnahtar123456789012345"); // SONDAKİ '6' YOK, ARTIK 32 KARAKTER
+        private static readonly byte[] IV = Encoding.UTF8.GetBytes("BuBirIlklendirme"); // 16 karakter / 16 byte
 
         public static byte[] Encrypt(string plainText)
         {
@@ -18,7 +19,9 @@ namespace HakanEXE.Agent.Core
             byte[] encrypted;
             using (Aes aesAlg = Aes.Create())
             {
-                aesAlg.Key = Key;
+                aesAlg.KeySize = 256; // Anahtar boyutunu açıkça belirtelim (opsiyonel ama iyi bir pratik)
+                aesAlg.BlockSize = 128; // Blok boyutunu açıkça belirtelim (opsiyonel)
+                aesAlg.Key = Key;       // BU SATIRDA HATA ALIYORDUN
                 aesAlg.IV = IV;
                 aesAlg.Mode = CipherMode.CBC;
                 aesAlg.Padding = PaddingMode.PKCS7;
@@ -48,7 +51,9 @@ namespace HakanEXE.Agent.Core
             string plaintext = null;
             using (Aes aesAlg = Aes.Create())
             {
-                aesAlg.Key = Key; 
+                aesAlg.KeySize = 256; // Anahtar boyutunu açıkça belirtelim
+                aesAlg.BlockSize = 128; // Blok boyutunu açıkça belirtelim
+                aesAlg.Key = Key;
                 aesAlg.IV = IV;
                 aesAlg.Mode = CipherMode.CBC;
                 aesAlg.Padding = PaddingMode.PKCS7;

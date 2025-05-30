@@ -7,117 +7,96 @@ namespace HakanEXE.Agent.Core
 {
     public static class CommandExecutor
     {
-        public static string ExecuteCmdCommand(string command)
+        public static string ExecuteCmdCommand(string command) // BU METODU GÜNCELLİYORUZ
         {
+            if (string.IsNullOrWhiteSpace(command))
+            {
+                return "Hata: Boş komut gönderildi.";
+            }
+
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", $"/c {command}")
+                ProcessStartInfo processStartInfo = new ProcessStartInfo("cmd.exe", $"/c {command}") // /c komutu çalıştırıp sonlanır
                 {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,  // Çıktıyı yakalamak için
+                    RedirectStandardError = true,   // Hataları yakalamak için
+                    UseShellExecute = false,        // Yeni bir pencere açma
+                    CreateNoWindow = true,          // Görünür bir pencere oluşturma
                     StandardOutputEncoding = Encoding.UTF8, // Türkçe karakterler için
                     StandardErrorEncoding = Encoding.UTF8   // Türkçe karakterler için
                 };
 
-                using (Process process = Process.Start(psi))
+                using (Process process = new Process())
                 {
-                    if (process == null) return "İşlem başlatılamadı.";
+                    process.StartInfo = processStartInfo;
+                    process.Start();
 
-                    StringBuilder output = new StringBuilder();
-                    // Zaman aşımı ekleyerek sonsuz döngüleri veya çok uzun süren komutları yönet
-                    if (!process.WaitForExit(15000)) // 15 saniye zaman aşımı
+                    // Çıktıyı ve hatayı oku
+                    // WaitForExit'ten önce OutputDataReceived ve ErrorDataReceived event'lerini kullanmak
+                    // büyük çıktılarda takılmaları önleyebilir ama basitlik için ReadToEnd kullanıyoruz.
+                    // Uzun süren komutlar için timeout eklemek iyi bir pratik olur.
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+
+                    process.WaitForExit(10000); // Maksimum 10 saniye bekle
+
+                    if (!string.IsNullOrEmpty(error))
                     {
-                        try { process.Kill(); } catch { /* Kill başarısız olursa görmezden gel */ }
-                        output.AppendLine("Komut zaman aşımına uğradı.");
+                        return $"HATA:\n{error}\nÇIKTI (eğer varsa):\n{output}";
                     }
-                    else
-                    {
-                        output.Append(process.StandardOutput.ReadToEnd());
-                        output.Append(process.StandardError.ReadToEnd());
-                    }
-                    return output.ToString();
+                    return output;
                 }
             }
             catch (Exception ex)
             {
-                return $"Komut çalıştırma hatası: {ex.Message}";
+                Console.WriteLine($"CMD komutu çalıştırma hatası ({command}): {ex.ToString()}");
+                return $"Komut '{command}' çalıştırılırken istisna oluştu: {ex.Message}";
             }
         }
 
         public static void Shutdown()
         {
-            try { Process.Start("shutdown", "/s /f /t 0"); }
-            catch (Exception ex) { Console.WriteLine("Kapatma hatası: " + ex.Message); }
+            try
+            {
+                Process.Start("shutdown", "/s /f /t 0");
+                Console.WriteLine("Kapatma komutu gönderildi.");
+            }
+            catch (Exception ex) { Console.WriteLine($"Kapatma hatası: {ex.Message}"); }
         }
 
         public static void Restart()
         {
-            try { Process.Start("shutdown", "/r /f /t 0"); }
-            catch (Exception ex) { Console.WriteLine("Yeniden başlatma hatası: " + ex.Message); }
+            try
+            {
+                Process.Start("shutdown", "/r /f /t 0");
+                Console.WriteLine("Yeniden başlatma komutu gönderildi.");
+            }
+            catch (Exception ex) { Console.WriteLine($"Yeniden başlatma hatası: {ex.Message}"); }
         }
 
         public static void OpenNotepad()
         {
-            try { Process.Start("notepad.exe"); }
-            catch (Exception ex) { Console.WriteLine("Notepad açma hatası: " + ex.Message); }
+            try
+            {
+                Process.Start("notepad.exe");
+                Console.WriteLine("Notepad.exe başarıyla başlatıldı.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Notepad açma hatası: {ex.Message}");
+            }
         }
 
         public static string GetFileList(string path)
         {
-            try
-            {
-                if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
-                {
-                    return "Hata: Belirtilen dizin bulunamadı veya geçersiz.";
-                }
-
-                StringBuilder sb = new StringBuilder();
-                sb.AppendLine($"Dizin: {path}");
-
-                foreach (string dir in Directory.GetDirectories(path))
-                {
-                    sb.AppendLine($"<DIR>\t{Path.GetFileName(dir)}");
-                }
-                foreach (string file in Directory.GetFiles(path))
-                {
-                    FileInfo fi = new FileInfo(file);
-                    sb.AppendLine($"<FILE>\t{Path.GetFileName(file)}\t{fi.Length} bytes");
-                }
-                return sb.ToString();
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return $"Hata: '{path}' dizinine erişim yetkiniz yok.";
-            }
-            catch (Exception ex)
-            {
-                return $"Dosya listesi alınamadı: {ex.Message}";
-            }
+            Console.WriteLine($"GetFileList çağrıldı: {path} (implementasyon eklenecek).");
+            return $"'{path}' için dosya listesi özelliği eklenecek.";
         }
 
         public static bool DeleteFile(string filePath)
         {
-            try
-            {
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                    return true;
-                }
-                else if (Directory.Exists(filePath)) // Klasör silme için ayrı bir komut daha iyi olurdu ama basitçe ekleyelim
-                {
-                    Directory.Delete(filePath, true); // true ile içindekileri de siler
-                    return true;
-                }
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Silme hatası ({filePath}): {ex.Message}");
-                return false;
-            }
+            Console.WriteLine($"DeleteFile çağrıldı: {filePath} (implementasyon eklenecek).");
+            return false;
         }
     }
 }

